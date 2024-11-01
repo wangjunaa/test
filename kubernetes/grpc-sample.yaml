@@ -1,0 +1,83 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: grpcserver
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grpcserver
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: grpcserver
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: grpcserver
+    spec:
+      tolerations:
+        - key: "eks.amazonaws.com/compute-type"
+          operator: "Equal"
+          value: "fargate"
+          effect: "NoSchedule"
+      containers:
+        - name: grpc-demo
+          image: 891377209558.dkr.ecr.ap-southeast-1.amazonaws.com/helloworld-grpc:latest
+          imagePullPolicy: Always
+          ports:
+            - name: grpc-api
+              containerPort: 9000
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+      restartPolicy: Always
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grpcserver
+  namespace: default
+spec:
+  ports:
+    - port: 9000
+      protocol: TCP
+      targetPort: 9000
+  clusterIP: None  # ClusterIP为None表示这是一个Headless Service，适合gRPC服务发现。
+  selector:
+    app: grpcserver
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/backend-protocol-version: "GRPC" # 确保使用GRPC协议。
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS":443}]'
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-southeast-1:891377209558:certificate/876af4fb-593c-4c53-86de-55e1511b1486
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP # 根据需要调整健康检查协议。
+  labels:
+    app: grpcserver
+    environment: dev
+  name: grpcserver
+  namespace: default
+spec:
+  ingressClassName: alb
+  rules:
+    - host: rpc-test.metavibe-api.com # 替换为您的实际域名。
+      http:
+        paths:
+          - backend:
+              service:
+                name: grpcserver
+                port:
+                  number: 9000 # 确保与Service中的端口一致。
+            path: /
+            pathType: Prefix
